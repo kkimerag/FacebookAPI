@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Facebook API Service
+
+Globals:
+    Api:
+        Cors:
+            AllowMethods: "'GET,POST,OPTIONS'"
+            AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+            AllowOrigin: "'*'"
+        GatewayResponses:
+              DEFAULT_4XX:
+                ResponseParameters:
+                  Headers:
+                    Access-Control-Allow-Origin: "'*'"
+                    Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+                    Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              DEFAULT_5XX:
+                ResponseParameters:
+                  Headers:
+                    Access-Control-Allow-Origin: "'*'"
+                    Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+                    Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+
+
+Resources:
+  FacebookAPIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FacebookAPISecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: arn:aws:secretsmanager:us-east-1:*:secret:facebook/credentials*
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !GetAtt FacebookTokensTable.Arn
+                  - arn:aws:dynamodb:us-east-1:039612842158:table/token-tracking
+        - PolicyName: EventBridgePublishAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: arn:aws:events:us-east-1:039612842158:event-bus/default
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: arn:aws:states:us-east-1:039612842158:stateMachine:MyStateMachine-0n2fg15zg
+                              
+  FacebookAPIFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt FacebookAPIRole.Arn
+      Layers:
+        - !Ref FacebookLayer
+        - arn:aws:lambda:us-east-1:039612842158:layer:request-layer:1
+        - arn:aws:lambda:us-east-1:039612842158:layer:response-layer:1
+        - arn:aws:lambda:us-east-1:039612842158:layer:token-tracking-layer:46
+      Environment:
+        Variables:
+          ALLOW_ORIGINS: "*"       
+      Events:
+        PostToPage:
+            Type: Api
+            Properties:
+              Path: /post-to-page
+              Method: post
+        GetAccessToken:
+          Type: Api
+          Properties:
+            Path: /get-access-token
+            Method: post
+        ExtendToken:
+          Type: Api
+          Properties:
+            Path: /extend-token
+            Method: post
+        GetPages:
+          Type: Api
+          Properties:
+            Path: /get-pages
+            Method: get
+        GetPagesInfo:
+          Type: Api
+          Properties:
+            Path: /get_page_info
+            Method: get    
+        GetPagePosts:
+          Type: Api
+          Properties:
+            Path: /get-page-feed
+            Method: get   
+        WebhookVerification:
+          Type: Api
+          Properties:
+            Path: /webhook
+            Method: get
+        WebhookProcessing:
+          Type: Api
+          Properties:
+            Path: /webhook
+            Method: post   
+        GetPageSubscriptions:
+          Type: Api
+          Properties:
+            Path: /page-subscriptions
+            Method: get
+        SubscribeToPage:
+          Type: Api
+          Properties:
+            Path: /subscribe-to-page
+            Method: post     
+        UnsubscribeFromPage:
+          Type: Api
+          Properties:
+            Path: /unsubscribe-from-page
+            Method: post           
+     
+    
+  FacebookLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: facebook-layer
+      Description: Facebook API Service Layer
+      ContentUri: facebook_layer/
+      CompatibleRuntimes:
+        - python3.13
+      RetentionPolicy: Retain
+
+  FacebookTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: facebook_page_tokens
+      AttributeDefinitions:
+        - AttributeName: page_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: page_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST    
+
+  FacebookWebhookRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Rule to process Facebook webhook events via state machine"
+      State: ENABLED
+      EventPattern:
+        source:
+          - facebook.webhook
+        detail-type:
+          - "Facebook Webhook Event"
+      Targets:
+        - Arn: arn:aws:states:us-east-1:039612842158:stateMachine:MyStateMachine-0n2fg15zg
+          Id: "FacebookWebhookTarget"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+          InputPath: "$.detail"
