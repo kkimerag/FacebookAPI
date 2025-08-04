@@ -811,6 +811,381 @@ class FacebookService:
         """
         return commenter_id == page_id
 
+    def send_message(self, recipient_id, message_text, page_access_token):
+        """
+        Send a text message to a user via Facebook Messenger
+        
+        :param recipient_id: The PSID (Page-Scoped ID) of the recipient
+        :param message_text: The text message to send
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {"text": message_text},
+            "messaging_type": "RESPONSE"
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            if 'message_id' in result:
+                return {
+                    "status": "success",
+                    "message_id": result['message_id'],
+                    "recipient_id": recipient_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error_details": result.get('error', {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def send_message_with_attachment(self, recipient_id, attachment_type, attachment_url, page_access_token):
+        """
+        Send a message with media attachment (image, video, audio, file)
+        
+        :param recipient_id: The PSID of the recipient
+        :param attachment_type: Type of attachment ('image', 'video', 'audio', 'file')
+        :param attachment_url: URL of the media file
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "attachment": {
+                    "type": attachment_type,
+                    "payload": {"url": attachment_url}
+                }
+            },
+            "messaging_type": "RESPONSE"
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            if 'message_id' in result:
+                return {
+                    "status": "success",
+                    "message_id": result['message_id'],
+                    "recipient_id": recipient_id,
+                    "attachment_type": attachment_type,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error_details": result.get('error', {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def send_quick_reply_message(self, recipient_id, message_text, quick_replies, page_access_token):
+        """
+        Send a message with quick reply buttons
+        
+        :param recipient_id: The PSID of the recipient
+        :param message_text: The text message to send
+        :param quick_replies: List of quick reply options [{"title": "Option 1", "payload": "PAYLOAD_1"}, ...]
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        # Format quick replies for Facebook API
+        formatted_quick_replies = []
+        for reply in quick_replies:
+            formatted_quick_replies.append({
+                "content_type": "text",
+                "title": reply["title"],
+                "payload": reply["payload"]
+            })
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "text": message_text,
+                "quick_replies": formatted_quick_replies
+            },
+            "messaging_type": "RESPONSE"
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            if 'message_id' in result:
+                return {
+                    "status": "success",
+                    "message_id": result['message_id'],
+                    "recipient_id": recipient_id,
+                    "quick_replies_count": len(quick_replies),
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error_details": result.get('error', {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def send_template_message(self, recipient_id, template_type, elements, page_access_token):
+        """
+        Send a structured template message (generic, button, etc.)
+        
+        :param recipient_id: The PSID of the recipient
+        :param template_type: Type of template ('generic', 'button', 'list', etc.)
+        :param elements: Template elements/content
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": template_type,
+                        "elements": elements
+                    }
+                }
+            },
+            "messaging_type": "RESPONSE"
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            if 'message_id' in result:
+                return {
+                    "status": "success",
+                    "message_id": result['message_id'],
+                    "recipient_id": recipient_id,
+                    "template_type": template_type,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error_details": result.get('error', {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def mark_message_as_seen(self, sender_id, page_access_token):
+        """
+        Mark a message as seen/read
+        
+        :param sender_id: The PSID of the sender
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": sender_id},
+            "sender_action": "mark_seen"
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            return {
+                "status": "success" if 'recipient_id' in result else "error",
+                "sender_id": sender_id,
+                "action": "mark_seen",
+                "response": result,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def set_typing_indicator(self, recipient_id, action, page_access_token):
+        """
+        Set typing indicator (on/off)
+        
+        :param recipient_id: The PSID of the recipient
+        :param action: 'typing_on' or 'typing_off'
+        :param page_access_token: Access token for the page
+        :return: JSON response from Facebook API
+        """
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "sender_action": action
+        }
+        
+        params = {"access_token": page_access_token}
+        
+        try:
+            response = requests.post(url, json=payload, params=params)
+            result = response.json()
+            
+            return {
+                "status": "success" if 'recipient_id' in result else "error",
+                "recipient_id": recipient_id,
+                "action": action,
+                "response": result,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def get_user_profile(self, user_id, page_access_token, fields=None):
+        """
+        Get user profile information
+        
+        :param user_id: The PSID of the user
+        :param page_access_token: Access token for the page
+        :param fields: Comma-separated string of fields to retrieve
+        :return: JSON response with user profile data
+        """
+        if fields is None:
+            fields = "first_name,last_name,profile_pic"
+        
+        url = f"https://graph.facebook.com/v18.0/{user_id}"
+        
+        params = {
+            "fields": fields,
+            "access_token": page_access_token
+        }
+        
+        try:
+            response = requests.get(url, params=params)
+            result = response.json()
+            
+            if 'first_name' in result or 'id' in result:
+                return {
+                    "status": "success",
+                    "user_profile": result,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error_details": result.get('error', {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def process_messaging_webhook(self, payload):
+        """
+        Process incoming messaging webhook events
+        
+        :param payload: The JSON payload from the webhook
+        :return: List of processed messaging events
+        """
+        if 'object' not in payload or payload['object'] != 'page':
+            raise ValueError("Received webhook is not for a page")
+        
+        processed_events = []
+        
+        for entry in payload.get('entry', []):
+            page_id = entry.get('id')
+            
+            # Process messaging events
+            for messaging_event in entry.get('messaging', []):
+                event_info = {
+                    'page_id': page_id,
+                    'timestamp': messaging_event.get('timestamp'),
+                    'sender_id': messaging_event.get('sender', {}).get('id'),
+                    'recipient_id': messaging_event.get('recipient', {}).get('id')
+                }
+                
+                # Handle different types of messaging events
+                if 'message' in messaging_event:
+                    message = messaging_event['message']
+                    event_info.update({
+                        'event_type': 'message',
+                        'message_id': message.get('mid'),
+                        'message_text': message.get('text'),
+                        'attachments': message.get('attachments', []),
+                        'quick_reply': message.get('quick_reply')
+                    })
+                elif 'postback' in messaging_event:
+                    postback = messaging_event['postback']
+                    event_info.update({
+                        'event_type': 'postback',
+                        'postback_payload': postback.get('payload'),
+                        'postback_title': postback.get('title')
+                    })
+                elif 'delivery' in messaging_event:
+                    delivery = messaging_event['delivery']
+                    event_info.update({
+                        'event_type': 'delivery',
+                        'delivered_messages': delivery.get('mids', []),
+                        'watermark': delivery.get('watermark')
+                    })
+                elif 'read' in messaging_event:
+                    read = messaging_event['read']
+                    event_info.update({
+                        'event_type': 'read',
+                        'watermark': read.get('watermark')
+                    })
+                
+                processed_events.append(event_info)
+        
+        return processed_events        
+
     # Modified method to use the new helper methods
     def _process_feed_event(self, value, page_id):
         """

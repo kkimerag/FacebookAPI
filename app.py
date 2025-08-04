@@ -245,6 +245,86 @@ def handle_api_gateway_request(event, fb_service):
         except Exception as e:
             return response_helper.create_error_response(f"Error unsubscribing from page: {str(e)}", 500)        
 
+    elif path == '/send-message' and http_method == 'POST':
+        try:
+            body = json.loads(event['body'])
+            recipient_id = body.get('recipient_id')
+            message_text = body.get('message_text')
+            page_access_token = body.get('page_access_token')
+            
+            if not recipient_id or not message_text or not page_access_token:
+                return response_helper.create_error_response("Missing required parameters", 400)
+            
+            result = fb_service.send_message(recipient_id, message_text, page_access_token)
+            return response_helper.create_response(result)
+        except Exception as e:
+            return response_helper.create_error_response(f"Error sending message: {str(e)}", 500)
+
+    elif path == '/send-message-attachment' and http_method == 'POST':
+        try:
+            body = json.loads(event['body'])
+            recipient_id = body.get('recipient_id')
+            attachment_type = body.get('attachment_type')
+            attachment_url = body.get('attachment_url')
+            page_access_token = body.get('page_access_token')
+            
+            if not all([recipient_id, attachment_type, attachment_url, page_access_token]):
+                return response_helper.create_error_response("Missing required parameters", 400)
+            
+            result = fb_service.send_message_with_attachment(recipient_id, attachment_type, attachment_url, page_access_token)
+            return response_helper.create_response(result)
+        except Exception as e:
+            return response_helper.create_error_response(f"Error sending attachment: {str(e)}", 500)
+
+    elif path == '/send-quick-reply' and http_method == 'POST':
+        try:
+            body = json.loads(event['body'])
+            recipient_id = body.get('recipient_id')
+            message_text = body.get('message_text')
+            quick_replies = body.get('quick_replies', [])
+            page_access_token = body.get('page_access_token')
+            
+            if not all([recipient_id, message_text, page_access_token]):
+                return response_helper.create_error_response("Missing required parameters", 400)
+            
+            result = fb_service.send_quick_reply_message(recipient_id, message_text, quick_replies, page_access_token)
+            return response_helper.create_response(result)
+        except Exception as e:
+            return response_helper.create_error_response(f"Error sending quick reply: {str(e)}", 500)
+
+    elif path == '/get-user-profile' and http_method == 'GET':
+        try:
+            params = event.get('queryStringParameters', {})
+            user_id = params.get('user_id')
+            page_access_token = params.get('page_access_token')
+            fields = params.get('fields')
+            
+            if not user_id or not page_access_token:
+                return response_helper.create_error_response("Missing required parameters", 400)
+            
+            result = fb_service.get_user_profile(user_id, page_access_token, fields)
+            return response_helper.create_response(result)
+        except Exception as e:
+            return response_helper.create_error_response(f"Error getting user profile: {str(e)}", 500)
+
+    elif path == '/set-typing' and http_method == 'POST':
+        try:
+            body = json.loads(event['body'])
+            recipient_id = body.get('recipient_id')
+            action = body.get('action', 'typing_on')  # Default to typing_on
+            page_access_token = body.get('page_access_token')
+            
+            if not recipient_id or not page_access_token:
+                return response_helper.create_error_response("Missing required parameters", 400)
+            
+            if action not in ['typing_on', 'typing_off']:
+                return response_helper.create_error_response("Invalid action. Use 'typing_on' or 'typing_off'", 400)
+            
+            result = fb_service.set_typing_indicator(recipient_id, action, page_access_token)
+            return response_helper.create_response(result)
+        except Exception as e:
+            return response_helper.create_error_response(f"Error setting typing indicator: {str(e)}", 500)
+            
     else:
         return response_helper.create_error_response('Invalid path or HTTP method', 404)
 
@@ -469,7 +549,41 @@ def handle_step_function_request(event, fb_service):
         
         # Call the service to reply to the comment
         return fb_service.reply_to_comment(original_comment_id, page_access_token, reply_text, commenter_id)    
+
+    elif action == 'send_message':
+        recipient_id = event.get('recipient_id')
+        message_text = event.get('message_text')
+        page_access_token = event.get('page_access_token')
         
+        if not recipient_id or not message_text or not page_access_token:
+            return {"error": "Missing required parameters"}
+        
+        result = fb_service.send_message(recipient_id, message_text, page_access_token)
+        return result
+
+    elif action == 'send_message_attachment':
+        recipient_id = event.get('recipient_id')
+        attachment_type = event.get('attachment_type')
+        attachment_url = event.get('attachment_url')
+        page_access_token = event.get('page_access_token')
+        
+        if not all([recipient_id, attachment_type, attachment_url, page_access_token]):
+            return {"error": "Missing required parameters"}
+        
+        result = fb_service.send_message_with_attachment(recipient_id, attachment_type, attachment_url, page_access_token)
+        return result
+
+    elif action == 'get_user_profile':
+        user_id = event.get('user_id')
+        page_access_token = event.get('page_access_token')
+        fields = event.get('fields')
+        
+        if not user_id or not page_access_token:
+            return {"error": "Missing required parameters"}
+        
+        result = fb_service.get_user_profile(user_id, page_access_token, fields)
+        return result
+
     else:
         raise ValueError(f"Invalid action: {action}")
   

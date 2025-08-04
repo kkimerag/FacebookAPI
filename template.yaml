@@ -161,6 +161,11 @@ Resources:
           Type: Api
           Properties:
             Path: /unsubscribe-from-page
+            Method: post    
+        SendMessage:
+          Type: Api
+          Properties:
+            Path: /send-message
             Method: post           
      
     
