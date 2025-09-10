@@ -207,19 +207,39 @@ class FacebookService:
         response = requests.get(url, params=params)
         return response.json()    
 
+    import requests
+
     def get_facebook_pages(self, user_access_token):
         url = "https://graph.facebook.com/v18.0/me/accounts"
         params = {
-            "fields": "id,name,access_token,category,about{full_text}, bio, description, story,fan_count,link,website,picture",
+            "fields": "id,name,access_token,category,about,bio,description,story,fan_count,link,website,picture",
             "access_token": user_access_token
         }
         response = requests.get(url, params=params)
         data = response.json()
         
-        if "data" in data:
-            return data["data"]  # Returns a list of page details
-        else:
+        if "data" not in data:
             return {"error": data}
+
+        pages = data["data"]
+
+        # Now fetch instagram account for each page
+        for page in pages:
+            page_token = page.get("access_token")
+            page_id = page.get("id")
+
+            ig_url = f"https://graph.facebook.com/v18.0/{page_id}"
+            ig_params = {
+                "fields": "instagram_business_account",
+                "access_token": page_token  # must use PAGE token here
+            }
+            ig_response = requests.get(ig_url, params=ig_params).json()
+            ig_account = ig_response.get("instagram_business_account")
+            
+            page["instagram_id"] = ig_account["id"] if ig_account else None
+
+        return pages
+
 
     def get_page_data(self, page_id, page_access_token): #To be deleted
         url = f"https://graph.facebook.com/v18.0/{page_id}"
