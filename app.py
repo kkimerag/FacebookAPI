@@ -100,11 +100,21 @@ def handle_api_gateway_request(event, fb_service):
         message = body.get('message')
         requires_image = body.get('requiresImage', False)
         image_url = body.get('image_url', None)
+        social_media = body.get('social_media', 'Facebook')  
 
         if not page_id or not page_access_token or not message:
             return response_helper.create_error_response("Missing required parameters", 400)    
         
-        result = fb_service.post_to_facebook_page(page_id, page_access_token, message, requires_image, image_url)
+        social_media = body.get('social_media', 'Facebook')  # Default to Facebook
+
+        if social_media == 'Instagram':
+            instagram_id = body.get('instagram_id')
+            if not instagram_id:
+                return response_helper.create_error_response("Missing instagram_id parameter", 400)
+            result = fb_service.post_to_instagram(instagram_id, page_access_token, message, image_url)
+        else:
+            result = fb_service.post_to_facebook_page(page_id, page_access_token, message, requires_image, image_url)
+
         return response_helper.create_response(result)
 
     elif path == '/get-page-feed' and http_method == 'GET':
@@ -324,20 +334,6 @@ def handle_api_gateway_request(event, fb_service):
             return response_helper.create_response(result)
         except Exception as e:
             return response_helper.create_error_response(f"Error setting typing indicator: {str(e)}", 500)
-
-    elif path == '/post-to-instagram' and http_method == 'POST':
-        body = json.loads(event['body'])
-        instagram_id = body.get('instagram_id')
-        page_access_token = body.get('page_access_token')
-        caption = body.get('caption')
-        image_url = body.get('image_url')
-
-        if not instagram_id or not page_access_token or not image_url:
-            return response_helper.create_error_response("Missing required parameters", 400)
-
-        result = fb_service.post_to_instagram(instagram_id, page_access_token, caption, image_url)
-        return response_helper.create_response(result)
-        
             
     else:
         return response_helper.create_error_response('Invalid path or HTTP method', 404)
@@ -375,7 +371,16 @@ def handle_step_function_request(event, fb_service):
         if not page_id or not page_access_token or not message:
             return {"error": "Missing required parameters"}
 
-        result = fb_service.post_to_facebook_page(page_id, page_access_token, message, mediaType, mm_url)
+        social_media = event.get('social_media', 'Facebook')
+
+        if social_media == 'Instagram':
+            instagram_id = page_id
+            if not instagram_id:
+                return {"error": "Missing required parameter: instagram_id"}
+            result = fb_service.post_to_instagram(instagram_id, page_access_token, message, mm_url)
+        else:
+            result = fb_service.post_to_facebook_page(page_id, page_access_token, message, mediaType, mm_url)
+
         return result
 
     elif action == 'post_reel':
@@ -608,17 +613,6 @@ def handle_step_function_request(event, fb_service):
         result = fb_service.get_instagram_profile_details(instagram_id, page_access_token)
         return result
 
-    elif action == 'post_to_instagram':
-        instagram_id = event.get('instagram_id')
-        page_access_token = event.get('page_access_token')
-        caption = event.get('caption')
-        image_url = event.get('image_url')
-
-        if not instagram_id or not page_access_token or not image_url:
-            return {"error": "Missing required parameters: instagram_id, page_access_token, image_url"}
-
-        return fb_service.post_to_instagram(instagram_id, page_access_token, caption, image_url)
-    
     else:
         raise ValueError(f"Invalid action: {action}")
   
