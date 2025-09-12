@@ -324,6 +324,20 @@ def handle_api_gateway_request(event, fb_service):
             return response_helper.create_response(result)
         except Exception as e:
             return response_helper.create_error_response(f"Error setting typing indicator: {str(e)}", 500)
+
+    elif path == '/post-to-instagram' and http_method == 'POST':
+        body = json.loads(event['body'])
+        instagram_id = body.get('instagram_id')
+        page_access_token = body.get('page_access_token')
+        caption = body.get('caption')
+        image_url = body.get('image_url')
+
+        if not instagram_id or not page_access_token or not image_url:
+            return response_helper.create_error_response("Missing required parameters", 400)
+
+        result = fb_service.post_to_instagram(instagram_id, page_access_token, caption, image_url)
+        return response_helper.create_response(result)
+        
             
     else:
         return response_helper.create_error_response('Invalid path or HTTP method', 404)
@@ -584,6 +598,27 @@ def handle_step_function_request(event, fb_service):
         result = fb_service.get_user_profile(user_id, page_access_token, fields)
         return result
 
+    elif action == 'get_instagram_profile':
+        instagram_id = event.get('instagram_id')
+        page_access_token = event.get('page_access_token')
+        
+        if not instagram_id or not page_access_token:
+            return {"error": "Missing required parameters: instagram_id and page_access_token"}
+        
+        result = fb_service.get_instagram_profile_details(instagram_id, page_access_token)
+        return result
+
+    elif action == 'post_to_instagram':
+        instagram_id = event.get('instagram_id')
+        page_access_token = event.get('page_access_token')
+        caption = event.get('caption')
+        image_url = event.get('image_url')
+
+        if not instagram_id or not page_access_token or not image_url:
+            return {"error": "Missing required parameters: instagram_id, page_access_token, image_url"}
+
+        return fb_service.post_to_instagram(instagram_id, page_access_token, caption, image_url)
+    
     else:
         raise ValueError(f"Invalid action: {action}")
   

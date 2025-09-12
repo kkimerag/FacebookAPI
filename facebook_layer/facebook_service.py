@@ -240,7 +240,6 @@ class FacebookService:
 
         return pages
 
-
     def get_page_data(self, page_id, page_access_token): #To be deleted
         url = f"https://graph.facebook.com/v18.0/{page_id}"
         params = {
@@ -477,7 +476,6 @@ class FacebookService:
                 "phase": "upload_hosted_file",
                 "timestamp": datetime.now().isoformat()
             }
-
  
     def check_reel_upload_status(self, page_id, page_access_token, video_id):
         """
@@ -1561,3 +1559,94 @@ class FacebookService:
                 "error_details": str(e),
                 "timestamp": datetime.now().isoformat()
             }
+
+    def get_instagram_profile_details(self, instagram_id, page_access_token):
+        """
+        Retrieve detailed Instagram profile information including biography, username, profile picture, and website
+        
+        :param instagram_id: The Instagram Business Account ID
+        :param page_access_token: Access token for the connected Facebook page
+        :return: Dictionary containing Instagram profile details
+        """
+        try:
+            url = f"https://graph.facebook.com/v18.0/{instagram_id}"
+            params = {
+                "fields": "biography,username,profile_picture_url,website,followers_count,follows_count,media_count,name,ig_id",
+                "access_token": page_access_token
+            }
+            
+            response = requests.get(url, params=params)
+            result = response.json()
+            
+            if 'error' in result:
+                print(f"Error fetching Instagram profile: {result['error']}")
+                return {
+                    "status": "error",
+                    "error_details": result['error'],
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Return the Instagram profile data
+            return {
+                "status": "success",
+                "instagram_id": result.get('id'),
+                "ig_id": result.get('ig_id'),  # This is the actual Instagram user ID
+                "username": result.get('username'),
+                "name": result.get('name'),
+                "biography": result.get('biography'),
+                "website": result.get('website'),
+                "profile_picture_url": result.get('profile_picture_url'),
+                "followers_count": result.get('followers_count'),
+                "follows_count": result.get('follows_count'),
+                "media_count": result.get('media_count'),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"Exception while fetching Instagram profile: {str(e)}")
+            return {
+                "status": "error",
+                "error_details": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def post_to_instagram(self, instagram_id, page_access_token, caption, image_url):
+        """
+        Publish a text/image post to a linked Instagram Business account.
+        
+        :param instagram_id: The Instagram Business account ID (from get_facebook_pages)
+        :param page_access_token: The access token of the connected Facebook Page
+        :param caption: The caption/text of the post
+        :param image_url: Publicly accessible image URL
+        :return: JSON response from the Instagram Graph API
+        """
+        try:
+            # Step 1: Create media container
+            create_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media"
+            create_params = {
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": page_access_token
+            }
+            create_resp = requests.post(create_url, data=create_params).json()
+            
+            if "id" not in create_resp:
+                return {"status": "error", "step": "media", "response": create_resp}
+            
+            creation_id = create_resp["id"]
+
+            # Step 2: Publish media
+            publish_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media_publish"
+            publish_params = {
+                "creation_id": creation_id,
+                "access_token": page_access_token
+            }
+            publish_resp = requests.post(publish_url, data=publish_params).json()
+
+            return {
+                "status": "success" if "id" in publish_resp else "error",
+                "creation_id": creation_id,
+                "publish_response": publish_resp
+            }
+        except Exception as e:
+            return {"status": "error", "details": str(e)}
