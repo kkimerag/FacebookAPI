@@ -207,8 +207,6 @@ class FacebookService:
         response = requests.get(url, params=params)
         return response.json()    
 
-    import requests
-
     def get_facebook_pages(self, user_access_token):
         url = "https://graph.facebook.com/v18.0/me/accounts"
         params = {
@@ -1610,32 +1608,55 @@ class FacebookService:
                 "timestamp": datetime.now().isoformat()
             }
 
-    def post_to_instagram(self, instagram_id, page_access_token, caption, image_url):
+    def post_to_instagram(self, instagram_id, page_access_token, caption, mm_url=None, mediaType="none"):
         """
-        Publish a text/image post to a linked Instagram Business account.
-        
-        :param instagram_id: The Instagram Business account ID (from get_facebook_pages)
-        :param page_access_token: The access token of the connected Facebook Page
+        Publish a post to a linked Instagram Business account.
+
+        :param instagram_id: The Instagram Business account ID
+        :param page_access_token: The access token for the linked Facebook Page
         :param caption: The caption/text of the post
-        :param image_url: Publicly accessible image URL
+        :param mm_url: Public URL of the media (image or video)
+        :param mediaType: "none" (text-only), "image", or "video"
         :return: JSON response from the Instagram Graph API
         """
         try:
-            # Step 1: Create media container
             create_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media"
-            create_params = {
-                "image_url": image_url,
-                "caption": caption,
-                "access_token": page_access_token
-            }
+
+            if mediaType == "video":
+                if not mm_url:
+                    return {"status": "error", "details": "Missing video URL"}
+                create_params = {
+                    "media_type": "VIDEO",
+                    "video_url": mm_url,
+                    "caption": caption,
+                    "access_token": page_access_token
+                }
+
+            elif mediaType == "image":
+                if not mm_url:
+                    return {"status": "error", "details": "Missing image URL"}
+                create_params = {
+                    "image_url": mm_url,
+                    "caption": caption,
+                    "access_token": page_access_token
+                }
+
+            else:  # text-only
+                if not caption:
+                    return {"status": "error", "details": "Missing caption for text-only post"}
+                create_params = {
+                    "caption": caption,
+                    "access_token": page_access_token
+                }
+
+            # Step 1: Create container
             create_resp = requests.post(create_url, data=create_params).json()
-            
             if "id" not in create_resp:
                 return {"status": "error", "step": "media", "response": create_resp}
-            
+
             creation_id = create_resp["id"]
 
-            # Step 2: Publish media
+            # Step 2: Publish container
             publish_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media_publish"
             publish_params = {
                 "creation_id": creation_id,
@@ -1648,5 +1669,7 @@ class FacebookService:
                 "creation_id": creation_id,
                 "publish_response": publish_resp
             }
+
         except Exception as e:
             return {"status": "error", "details": str(e)}
+
