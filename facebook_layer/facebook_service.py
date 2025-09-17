@@ -287,427 +287,505 @@ class FacebookService:
         response = requests.post(url, data=params)
         return response.json()
 
-    def init_reel_upload(self, page_id, page_access_token, description, video_url):
+    def init_reel_upload(self, page_id, page_access_token, description, video_url, platform="facebook", instagram_id=None):
         """
-        Step 1: Initialize a reel upload with video URL
+        Step 1: Initialize a reel/video upload for Facebook or Instagram
         
-        :param page_id: The Facebook page ID
+        :param page_id: The Facebook page ID (for Facebook) or ignored (for Instagram)
         :param page_access_token: The access token for the page
-        :param description: The description/caption for the reel
-        :param video_url: The URL of the video to use for the reel
+        :param description: The description/caption for the reel/video
+        :param video_url: The URL of the video to use
+        :param platform: "facebook" or "instagram"
+        :param instagram_id: Required for Instagram platform
         :return: Dictionary with upload session details
         """
         try:
-            # Initialize the upload session
-            start_url = f"https://graph.facebook.com/v18.0/{page_id}/video_reels"
-            start_params = {
-                "upload_phase": "start",
-                "access_token": page_access_token,
-                "video_url": video_url
-            }
-            start_response = requests.post(start_url, data=start_params)
-            start_result = start_response.json()
-            
-            if 'error' in start_result:
+            if platform.lower() == "instagram":
+                instagram_id = page_id
+                if not instagram_id:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "error_details": "instagram_id is required for Instagram platform",
+                        "phase": "initialization",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
+                # Instagram: Create media container
+                create_url = f"https://graph.facebook.com/v22.0/{instagram_id}/media"
+                create_params = {
+                    "media_type": "REELS",
+                    "video_url": video_url,
+                    "caption": description,
+                    "access_token": page_access_token,
+                    "share_to_feed": "true"
+                }
+                
+                create_resp = requests.post(create_url, data=create_params).json()
+                
+                if "id" not in create_resp:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "error_details": create_resp,
+                        "phase": "media_creation",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
                 return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "error_details": start_result['error'],
-                    "phase": "start",
+                    "status": "pending",
+                    "platform": platform,
+                    "instagram_id": instagram_id,
+                    "creation_id": create_resp["id"],  # This is the container ID for Instagram
+                    "video_id": create_resp["id"],   #Expected for the next State
+                    "description": description,
+                    "phase": "initialized",
                     "timestamp": datetime.now().isoformat()
                 }
-            
-            video_id = start_result.get('video_id')
-            if not video_id:
+                
+            else:  # Facebook
+                # Original Facebook implementation
+                start_url = f"https://graph.facebook.com/v22.0/{page_id}/video_reels"
+                start_params = {
+                    "upload_phase": "start",
+                    "access_token": page_access_token,
+                    "video_url": video_url
+                }
+                start_response = requests.post(start_url, data=start_params)
+                start_result = start_response.json()
+                
+                if 'error' in start_result:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "error_details": start_result['error'],
+                        "phase": "start",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
+                video_id = start_result.get('video_id')
+                if not video_id:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "error_details": "Missing video_id in start response",
+                        "phase": "start",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
                 return {
-                    "status": "error",
+                    "status": "pending",
+                    "platform": platform,
                     "page_id": page_id,
-                    "error_details": "Missing video_id in start response",
-                    "phase": "start",
+                    "video_id": video_id,
+                    "description": description,
+                    "phase": "initialized",
                     "timestamp": datetime.now().isoformat()
                 }
-            
-            # Store description and other details for later use
-            return {
-                "status": "pending",
-                "page_id": page_id,
-                "video_id": video_id,
-                "description": description,
-                "phase": "initialized",
-                "timestamp": datetime.now().isoformat()
-            }
+                
         except Exception as e:
             import traceback
             return {
                 "status": "error",
-                "page_id": page_id,
+                "platform": platform,
                 "error_details": str(e),
                 "traceback": traceback.format_exc(),
                 "phase": "initialization",
                 "timestamp": datetime.now().isoformat()
             }
 
-    def upload_hosted_file(self, page_id, page_access_token, video_id, file_url):
+    def upload_hosted_file(self, page_id, page_access_token, video_id, file_url, platform="facebook", **kwargs):
         """
-        Upload a hosted video file for a reel using the video ID from the initialization step.
+        Upload a hosted video file - Facebook only step, Instagram skips this
         
         :param page_id: The Facebook page ID
         :param page_access_token: The access token for the page
-        :param video_id: The ID of the video from the init_reel_upload step
-        :param file_url: The URL of the hosted video file (must allow facebookexternalhit/1.1 user agent)
+        :param video_id: The ID of the video from the init step
+        :param file_url: The URL of the hosted video file
+        :param platform: "facebook" or "instagram"
         :return: Dictionary with upload status
         """
         try:
-            print(f"[DEBUG] Starting hosted file upload for video_id: {video_id}, page_id: {page_id}")
-            print(f"[DEBUG] File URL: {file_url}")
-            
-            # Validate file_url
-            if not file_url.startswith('https://'):
-                print(f"[ERROR] File URL validation failed: {file_url} - Not using HTTPS protocol")
-                return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "error_details": "File URL must use HTTPS protocol",
-                    "phase": "upload_hosted_file",
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-            # Check if the host is not a Meta CDN (fbcdn URLs are rejected)
-            parsed_url = urlparse(file_url)
-            print(f"[DEBUG] URL host: {parsed_url.netloc}")
-            
-            if 'fbcdn.net' in parsed_url.netloc.lower():
-                print(f"[ERROR] Host validation failed: {parsed_url.netloc} - Meta CDN not supported")
-                return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "error_details": "Files hosted on Meta CDN (fbcdn) are not supported. Use crossposting instead.",
-                    "phase": "upload_hosted_file",
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-            upload_url = f"https://rupload.facebook.com/video-upload/v22.0/{video_id}"
-            print(f"[DEBUG] Upload endpoint: {upload_url}")
-            
-            headers = {
-                "Authorization": f"OAuth {page_access_token}",
-                "file_url": file_url
-            }
-            print(f"[DEBUG] Request headers: {headers}")
-            
-            # Print partially redacted token for debugging (security best practice)
-            token_preview = page_access_token[:5] + "..." + page_access_token[-5:] if len(page_access_token) > 10 else "***masked***"
-            print(f"[DEBUG] Using access token (partially redacted): {token_preview}")
-            
-            print("[DEBUG] Sending API request to Facebook...")
-            response = requests.post(upload_url, headers=headers)
-            print(f"[DEBUG] Response status code: {response.status_code}")
-            print(f"[DEBUG] Response content: {response.text[:200]}..." if len(response.text) > 200 else f"[DEBUG] Response content: {response.text}")
-            
-            result = response.json()
-            print(f"[DEBUG] Parsed JSON response: {result}")
-            
-            if result.get('success') is True:
-                print(f"[SUCCESS] File upload successful for video_id: {video_id}")
+            if platform.lower() == "instagram":
+                # Instagram doesn't need this step - video is already being processed from init step
                 return {
                     "status": "success",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "phase": "file_uploaded",
+                    "platform": platform,
+                    "phase": "upload_skipped_for_instagram",
+                    "message": "Instagram processes video directly from URL in init step",
                     "timestamp": datetime.now().isoformat()
                 }
-            else:
-                print(f"[ERROR] Upload failed. Error details: {result.get('error', 'Unknown error')}")
-                return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "error_details": result.get('error', 'Unknown error'),
-                    "phase": "upload_hosted_file",
-                    "timestamp": datetime.now().isoformat()
+            
+            else:  # Facebook - original implementation
+                print(f"[DEBUG] Starting hosted file upload for video_id: {video_id}, page_id: {page_id}")
+                print(f"[DEBUG] File URL: {file_url}")
+                
+                # Validate file_url
+                if not file_url.startswith('https://'):
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "error_details": "File URL must use HTTPS protocol",
+                        "phase": "upload_hosted_file",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                # Check if the host is not a Meta CDN
+                parsed_url = urlparse(file_url)
+                if 'fbcdn.net' in parsed_url.netloc.lower():
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "error_details": "Files hosted on Meta CDN (fbcdn) are not supported. Use crossposting instead.",
+                        "phase": "upload_hosted_file",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                upload_url = f"https://rupload.facebook.com/video-upload/v22.0/{video_id}"
+                headers = {
+                    "Authorization": f"OAuth {page_access_token}",
+                    "file_url": file_url
                 }
                 
-        except requests.exceptions.RequestException as req_err:
-            print(f"[ERROR] Request exception: {req_err}")
-            import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] Request exception traceback: {trace}")
-            return {
-                "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
-                "error_details": f"Request error: {str(req_err)}",
-                "error_type": "request_exception",
-                "traceback": trace,
-                "phase": "upload_hosted_file",
-                "timestamp": datetime.now().isoformat()
-            }
-        except ValueError as json_err:
-            print(f"[ERROR] JSON parsing error: {json_err}")
-            import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] JSON error traceback: {trace}")
-            return {
-                "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
-                "error_details": f"JSON parsing error: {str(json_err)}",
-                "error_type": "json_parsing_error", 
-                "response_text": response.text if 'response' in locals() else "No response",
-                "traceback": trace,
-                "phase": "upload_hosted_file",
-                "timestamp": datetime.now().isoformat()
-            }
+                response = requests.post(upload_url, headers=headers)
+                result = response.json()
+                
+                if result.get('success') is True:
+                    return {
+                        "status": "success",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "phase": "file_uploaded",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "error_details": result.get('error', 'Unknown error'),
+                        "phase": "upload_hosted_file",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
         except Exception as e:
-            print(f"[ERROR] Unexpected exception: {e}")
             import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] Exception traceback: {trace}")
             return {
                 "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
+                "platform": platform,
                 "error_details": str(e),
-                "traceback": trace,
+                "traceback": traceback.format_exc(),
                 "phase": "upload_hosted_file",
                 "timestamp": datetime.now().isoformat()
             }
  
-    def check_reel_upload_status(self, page_id, page_access_token, video_id):
+    def check_reel_upload_status(self, page_id, page_access_token, video_id, platform="facebook", instagram_id=None, creation_id=None):
         """
-        Step 2: Check if the uploaded video is ready
+        Check if the uploaded video is ready for both platforms
         
-        :param page_id: The Facebook page ID
+        :param page_id: The Facebook page ID (for Facebook)
         :param page_access_token: The access token for the page
-        :param video_id: The ID of the video being processed
+        :param video_id: The ID of the video being processed (Facebook)
+        :param platform: "facebook" or "instagram"
+        :param instagram_id: Instagram Business Account ID (for Instagram)
+        :param creation_id: Container ID for Instagram
         :return: Dictionary with upload status
         """
         try:
-            status_url = f"https://graph.facebook.com/v18.0/{video_id}"
-            status_params = {
-                "fields": "status",
-                "access_token": page_access_token
-            }
-            status_response = requests.get(status_url, params=status_params)
-            status_result = status_response.json()
-            
-            if 'error' in status_result:
-                return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "error_details": status_result['error'],
-                    "phase": "check_status",
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            if 'status' in status_result:
-                video_status = status_result['status'].get('video_status')
-                
-                if video_status == 'ready':
-                    return {
-                        "status": "ready",
-                        "page_id": page_id,
-                        "video_id": video_id,
-                        "phase": "video_ready",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                elif video_status == 'error':
+            if platform.lower() == "instagram":
+                instagram_id = page_id
+                creation_id = video_id
+                if not creation_id:
                     return {
                         "status": "error",
-                        "page_id": page_id,
-                        "video_id": video_id,
-                        "error_details": "Video processing failed",
-                        "facebook_error": status_result['status'].get('error'),
-                        "phase": "upload",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "error_details": "creation_id is required for Instagram status check",
+                        "phase": "check_status",
                         "timestamp": datetime.now().isoformat()
                     }
-                else:
-                    # Still processing
-                    return {
-                        "status": "processing",
-                        "page_id": page_id,
-                        "video_id": video_id,
-                        "video_status": video_status,
-                        "phase": "awaiting_ready",
-                        "raw_status": status_result['status'],
-                        "timestamp": datetime.now().isoformat()
-                    }
-            else:
-                return {
-                    "status": "unknown",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "raw_response": status_result,
-                    "phase": "check_status",
-                    "timestamp": datetime.now().isoformat()
+                
+                # Check Instagram container status
+                status_url = f"https://graph.facebook.com/v22.0/{creation_id}"
+                status_params = {
+                    "fields": "status_code",
+                    "access_token": page_access_token
                 }
+                status_response = requests.get(status_url, params=status_params)
+                status_result = status_response.json()
+                
+                if 'error' in status_result:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "creation_id": creation_id,
+                        "error_details": status_result['error'],
+                        "phase": "check_status",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
+                if 'status_code' in status_result:
+                    status_code = status_result['status_code']
+                    
+                    if status_code == 'FINISHED':
+                        return {
+                            "status": "ready",
+                            "platform": platform,
+                            "instagram_id": instagram_id,
+                            "creation_id": creation_id,
+                            "phase": "video_ready",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    elif status_code == 'ERROR':
+                        return {
+                            "status": "error",
+                            "platform": platform,
+                            "instagram_id": instagram_id,
+                            "creation_id": creation_id,
+                            "error_details": "Video processing failed",
+                            "phase": "processing",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    else:
+                        # Still processing
+                        return {
+                            "status": "processing",
+                            "platform": platform,
+                            "instagram_id": instagram_id,
+                            "creation_id": creation_id,
+                            "status_code": status_code,
+                            "phase": "awaiting_ready",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                else:
+                    return {
+                        "status": "unknown",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "creation_id": creation_id,
+                        "raw_response": status_result,
+                        "phase": "check_status",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            else:  # Facebook - original implementation
+                status_url = f"https://graph.facebook.com/v22.0/{video_id}"
+                status_params = {
+                    "fields": "status",
+                    "access_token": page_access_token
+                }
+                status_response = requests.get(status_url, params=status_params)
+                status_result = status_response.json()
+                
+                if 'error' in status_result:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "error_details": status_result['error'],
+                        "phase": "check_status",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
+                if 'status' in status_result:
+                    video_status = status_result['status'].get('video_status')
+                    
+                    if video_status == 'ready':
+                        return {
+                            "status": "ready",
+                            "platform": platform,
+                            "page_id": page_id,
+                            "video_id": video_id,
+                            "phase": "video_ready",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    elif video_status == 'error':
+                        return {
+                            "status": "error",
+                            "platform": platform,
+                            "page_id": page_id,
+                            "video_id": video_id,
+                            "error_details": "Video processing failed",
+                            "facebook_error": status_result['status'].get('error'),
+                            "phase": "upload",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    else:
+                        # Still processing
+                        return {
+                            "status": "processing",
+                            "platform": platform,
+                            "page_id": page_id,
+                            "video_id": video_id,
+                            "video_status": video_status,
+                            "phase": "awaiting_ready",
+                            "raw_status": status_result['status'],
+                            "timestamp": datetime.now().isoformat()
+                        }
+                else:
+                    return {
+                        "status": "unknown",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "raw_response": status_result,
+                        "phase": "check_status",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
         except Exception as e:
             import traceback
             return {
                 "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
+                "platform": platform,
                 "error_details": str(e),
                 "traceback": traceback.format_exc(),
                 "phase": "check_status",
                 "timestamp": datetime.now().isoformat()
-            }            
+            }
 
-    def publish_reel(self, page_id, page_access_token, video_id, description, share_to_feed=True, audio_name=None, thumbnail_url=None):
+    def publish_reel(self, page_id, page_access_token, video_id, description, platform="facebook", share_to_feed=True, audio_name=None, thumbnail_url=None, instagram_id=None, creation_id=None, **kwargs):
+
         """
-        Step 3: Publish the reel once the video is ready
+        Publish the reel/video once ready for both platforms
         
-        :param page_id: The Facebook page ID
+        :param page_id: The Facebook page ID (for Facebook)
         :param page_access_token: The access token for the page
-        :param video_id: The ID of the processed video
-        :param description: The description/caption for the reel
-        :param share_to_feed: Whether to share the reel to the page's feed (default: True)
-        :param audio_name: Optional name of audio track used in the reel
-        :param thumbnail_url: Optional URL for a custom thumbnail image
+        :param video_id: The ID of the processed video (Facebook)
+        :param description: The description/caption for the content
+        :param platform: "facebook" or "instagram"
+        :param instagram_id: Instagram Business Account ID (for Instagram)
+        :param creation_id: Container ID for Instagram
+        :param share_to_feed: Whether to share to main feed
         :return: Dictionary with publish status
         """
+
+        print(f'PLATFORM: {platform}')
+
         try:
-            print(f"[DEBUG] Starting publish_reel for video_id: {video_id}, page_id: {page_id}")
-            print(f"[DEBUG] Description length: {len(description)} characters")
-            print(f"[DEBUG] Share to feed: {share_to_feed}")
-            print(f"[DEBUG] Audio name provided: {'Yes' if audio_name else 'No'}")
-            print(f"[DEBUG] Thumbnail URL provided: {'Yes' if thumbnail_url else 'No'}")
-            
-            # Construct API endpoint
-            finish_url = f"https://graph.facebook.com/v18.0/{page_id}/video_reels"
-            print(f"[DEBUG] Publishing endpoint: {finish_url}")
-            
-            # Construct parameters
-            finish_params = {
-                "upload_phase": "finish",
-                "video_id": video_id,
-                "description": description,
-                "share_to_feed": "true" if share_to_feed else "false",
-                "access_token": page_access_token,
-                "video_state": "PUBLISHED"
-            }
-            
-            # Add optional parameters if provided
-            if audio_name:
-                finish_params["audio_name"] = audio_name
-                print(f"[DEBUG] Including audio_name: {audio_name}")
+            if platform.lower() == "instagram":
+
+                instagram_id = page_id
+                creation_id = video_id
+
+                if not instagram_id or not creation_id:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "error_details": "instagram_id and creation_id are required for Instagram publishing",
+                        "phase": "publish",
+                        "timestamp": datetime.now().isoformat()
+                    }
                 
-            if thumbnail_url:
-                finish_params["thumbnail_url"] = thumbnail_url
-                print(f"[DEBUG] Including thumbnail_url: {thumbnail_url}")
-            
-            # Print parameters for debugging (excluding sensitive information)
-            safe_params = finish_params.copy()
-            if 'access_token' in safe_params:
-                token_preview = page_access_token[:5] + "..." + page_access_token[-5:] if len(page_access_token) > 10 else "***masked***"
-                safe_params['access_token'] = token_preview
-            
-            print(f"[DEBUG] Request parameters: {safe_params}")
-            
-            # Send the API request
-            print("[DEBUG] Sending publish request to Facebook API...")
-            finish_response = requests.post(finish_url, data=finish_params)
-            print(f"[DEBUG] Response status code: {finish_response.status_code}")
-            print(f"[DEBUG] Response content: {finish_response.text[:200]}..." if len(finish_response.text) > 200 else f"[DEBUG] Response content: {finish_response.text}")
-            
-            # Parse the response
-            print("[DEBUG] Parsing JSON response...")
-            finish_result = finish_response.json()
-            print(f"[DEBUG] Parsed response: {finish_result}")
-            
-            # Check for success - Modified to handle Facebook's actual response format
-            if 'success' in finish_result and finish_result['success'] is True:
-                post_id = finish_result.get('post_id', None)
-                print(f"[SUCCESS] Reel publish initiated successfully! Post ID: {post_id}")
-                
-                return {
-                    "status": "success",
-                    "page_id": page_id,
-                    "reel_id": post_id,
-                    "video_id": video_id,
-                    "message": finish_result.get('message'),
-                    "share_to_feed": share_to_feed,
-                    "phase": "published",
-                    "timestamp": datetime.now().isoformat()
-                }
-            elif 'id' in finish_result:
-                # Keep original path for backward compatibility
-                print(f"[SUCCESS] Reel published successfully! Reel ID: {finish_result['id']}")
-                print(f"[DEBUG] Permalink URL: {finish_result.get('permalink_url', 'Not provided')}")
-                
-                return {
-                    "status": "success",
-                    "page_id": page_id,
-                    "reel_id": finish_result['id'],
-                    "video_id": video_id,
-                    "permalink_url": finish_result.get('permalink_url'),
-                    "share_to_feed": share_to_feed,
-                    "phase": "published",
-                    "timestamp": datetime.now().isoformat()
-                }
-            else:
-                error_details = finish_result.get('error', {})
-                print(f"[ERROR] Publish failed. Error details: {error_details}")
-                
-                return {
-                    "status": "error",
-                    "page_id": page_id,
-                    "video_id": video_id,
-                    "error_details": error_details,
-                    "phase": "publish",
-                    "timestamp": datetime.now().isoformat()
+                # Publish Instagram container
+                publish_url = f"https://graph.facebook.com/v22.0/{instagram_id}/media_publish"
+                publish_params = {
+                    "creation_id": creation_id,
+                    "access_token": page_access_token
                 }
                 
-        except requests.exceptions.RequestException as req_err:
-            print(f"[ERROR] Request exception during publish: {req_err}")
-            import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] Request exception traceback: {trace}")
-            
-            return {
-                "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
-                "error_details": f"Request error: {str(req_err)}",
-                "error_type": "request_exception",
-                "traceback": trace,
-                "phase": "publish",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except ValueError as json_err:
-            print(f"[ERROR] JSON parsing error during publish: {json_err}")
-            import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] JSON error traceback: {trace}")
-            
-            return {
-                "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
-                "error_details": f"JSON parsing error: {str(json_err)}",
-                "error_type": "json_parsing_error",
-                "response_text": finish_response.text if 'finish_response' in locals() else "No response",
-                "traceback": trace,
-                "phase": "publish",
-                "timestamp": datetime.now().isoformat()
-            }
-            
+                publish_resp = requests.post(publish_url, data=publish_params).json()
+                
+                if "id" in publish_resp:
+                    return {
+                        "status": "success",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "media_id": publish_resp["id"],
+                        "creation_id": creation_id,
+                        "phase": "published",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "instagram_id": instagram_id,
+                        "creation_id": creation_id,
+                        "error_details": publish_resp,
+                        "phase": "publish",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            else:  # Facebook - original implementation
+                finish_url = f"https://graph.facebook.com/v22.0/{page_id}/video_reels"
+                
+                finish_params = {
+                    "upload_phase": "finish",
+                    "video_id": video_id,
+                    "description": description,
+                    "share_to_feed": "true" if share_to_feed else "false",
+                    "access_token": page_access_token,
+                    "video_state": "PUBLISHED"
+                }
+                
+                # Add optional parameters
+                if kwargs.get('audio_name'):
+                    finish_params["audio_name"] = kwargs['audio_name']
+                if kwargs.get('thumbnail_url'):
+                    finish_params["thumbnail_url"] = kwargs['thumbnail_url']
+                
+                finish_response = requests.post(finish_url, data=finish_params)
+                finish_result = finish_response.json()
+                
+                # Check for success
+                if 'success' in finish_result and finish_result['success'] is True:
+                    post_id = finish_result.get('post_id', None)
+                    
+                    return {
+                        "status": "success",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "reel_id": post_id,
+                        "video_id": video_id,
+                        "message": finish_result.get('message'),
+                        "share_to_feed": share_to_feed,
+                        "phase": "published",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                elif 'id' in finish_result:
+                    return {
+                        "status": "success",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "reel_id": finish_result['id'],
+                        "video_id": video_id,
+                        "permalink_url": finish_result.get('permalink_url'),
+                        "share_to_feed": share_to_feed,
+                        "phase": "published",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    error_details = finish_result.get('error', {})
+                    
+                    return {
+                        "status": "error",
+                        "platform": platform,
+                        "page_id": page_id,
+                        "video_id": video_id,
+                        "error_details": error_details,
+                        "phase": "publish",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
         except Exception as e:
-            print(f"[ERROR] Unexpected exception during publish: {e}")
             import traceback
-            trace = traceback.format_exc()
-            print(f"[DEBUG] Exception traceback: {trace}")
-            
             return {
                 "status": "error",
-                "page_id": page_id,
-                "video_id": video_id,
+                "platform": platform,
                 "error_details": str(e),
-                "traceback": trace,
+                "traceback": traceback.format_exc(),
                 "phase": "publish",
                 "timestamp": datetime.now().isoformat()
             }
@@ -1608,30 +1686,29 @@ class FacebookService:
                 "timestamp": datetime.now().isoformat()
             }
 
-    def post_to_instagram(self, instagram_id, page_access_token, caption, mm_url=None, mediaType="none"):
-        """
-        Publish a post to a linked Instagram Business account.
-
-        :param instagram_id: The Instagram Business account ID
-        :param page_access_token: The access token for the linked Facebook Page
-        :param caption: The caption/text of the post
-        :param mm_url: Public URL of the media (image or video)
-        :param mediaType: "none" (text-only), "image", or "video"
-        :return: JSON response from the Instagram Graph API
-        """
+    def post_to_instagram(self, instagram_id, page_access_token, caption, mediaType, mm_url=None):
+        """Debug version with detailed logging"""
         try:
-            create_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media"
-
+            # Test video URL accessibility first
+            if mediaType == "video" and mm_url:
+                print(f"Testing video URL: {mm_url}")
+                test_resp = requests.head(mm_url)
+                print(f"Video URL status: {test_resp.status_code}")
+                print(f"Content-Type: {test_resp.headers.get('content-type')}")
+                print(f"Content-Length: {test_resp.headers.get('content-length')}")
+            
+            create_url = f"https://graph.facebook.com/v19.0/{instagram_id}/media"  # Updated API version
+            
             if mediaType == "video":
                 if not mm_url:
                     return {"status": "error", "details": "Missing video URL"}
                 create_params = {
-                    "media_type": "VIDEO",
+                    "media_type": "REELS",
                     "video_url": mm_url,
                     "caption": caption,
-                    "access_token": page_access_token
+                    "access_token": page_access_token,
+                    "share_to_feed": "TRUE"
                 }
-
             elif mediaType == "image":
                 if not mm_url:
                     return {"status": "error", "details": "Missing image URL"}
@@ -1640,7 +1717,6 @@ class FacebookService:
                     "caption": caption,
                     "access_token": page_access_token
                 }
-
             else:  # text-only
                 if not caption:
                     return {"status": "error", "details": "Missing caption for text-only post"}
@@ -1648,28 +1724,60 @@ class FacebookService:
                     "caption": caption,
                     "access_token": page_access_token
                 }
-
-            # Step 1: Create container
-            create_resp = requests.post(create_url, data=create_params).json()
-            if "id" not in create_resp:
-                return {"status": "error", "step": "media", "response": create_resp}
-
-            creation_id = create_resp["id"]
-
-            # Step 2: Publish container
-            publish_url = f"https://graph.facebook.com/v18.0/{instagram_id}/media_publish"
+            
+            print(f"Creating media with params: {create_params}")
+            create_resp = requests.post(create_url, data=create_params)
+            
+            print(f"Create response status: {create_resp.status_code}")
+            print(f"Create response headers: {dict(create_resp.headers)}")
+            
+            create_json = create_resp.json()
+            print(f"Create response JSON: {create_json}")
+            
+            if "id" not in create_json:
+                return {"status": "error", "step": "media", "response": create_json}
+            
+            creation_id = create_json["id"]
+            print(f"Creation ID: {creation_id}")
+            
+            # For videos, check status
+            if mediaType == "video":
+                status_url = f"https://graph.facebook.com/v19.0/{creation_id}"
+                status_params = {
+                    "fields": "status_code",
+                    "access_token": page_access_token
+                }
+                
+                for i in range(5):  # Check 5 times
+                    time.sleep(5)
+                    status_resp = requests.get(status_url, params=status_params).json()
+                    print(f"Status check {i+1}: {status_resp}")
+                    
+                    if status_resp.get("status_code") == "FINISHED":
+                        break
+                    elif status_resp.get("status_code") == "ERROR":
+                        return {"status": "error", "step": "processing", "response": status_resp}
+            
+            # Publish
+            publish_url = f"https://graph.facebook.com/v19.0/{instagram_id}/media_publish"
             publish_params = {
                 "creation_id": creation_id,
                 "access_token": page_access_token
             }
-            publish_resp = requests.post(publish_url, data=publish_params).json()
-
+            
+            print(f"Publishing with params: {publish_params}")
+            publish_resp = requests.post(publish_url, data=publish_params)
+            
+            print(f"Publish response status: {publish_resp.status_code}")
+            publish_json = publish_resp.json()
+            print(f"Publish response JSON: {publish_json}")
+            
             return {
-                "status": "success" if "id" in publish_resp else "error",
+                "status": "success" if "id" in publish_json else "error",
                 "creation_id": creation_id,
-                "publish_response": publish_resp
+                "publish_response": publish_json
             }
-
+            
         except Exception as e:
+            print(f"Exception occurred: {str(e)}")
             return {"status": "error", "details": str(e)}
-

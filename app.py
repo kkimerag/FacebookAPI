@@ -377,7 +377,7 @@ def handle_step_function_request(event, fb_service):
             instagram_id = page_id
             if not instagram_id:
                 return {"error": "Missing required parameter: instagram_id"}
-            result = fb_service.post_to_instagram(instagram_id, page_access_token, message, mm_url)
+            result = fb_service.post_to_instagram(instagram_id, page_access_token, message, mediaType, mm_url)
         else:
             result = fb_service.post_to_facebook_page(page_id, page_access_token, message, mediaType, mm_url)
 
@@ -400,11 +400,12 @@ def handle_step_function_request(event, fb_service):
         page_access_token = event.get('page_access_token')
         description = event.get('message')
         video_url = event.get('mm_url')
+        platform = event.get('platform')
         
         if not page_id or not page_access_token or not description or not video_url:
             return {"error": "Missing required parameters: page_id, page_access_token, description, or video_url"}
             
-        result = fb_service.init_reel_upload(page_id, page_access_token, description, video_url)
+        result = fb_service.init_reel_upload(page_id, page_access_token, description, video_url, platform)
         return result
         
     elif action == 'upload_hosted_file':
@@ -412,22 +413,24 @@ def handle_step_function_request(event, fb_service):
         page_access_token = event.get('page_access_token')
         video_id = event.get('video_id')
         file_url = event.get('mm_url')
+        platform = event.get('platform')
         
         if not page_id or not page_access_token or not video_id or not file_url:
             return {"error": "Missing required parameters: page_id, page_access_token, video_id, or file_url"}
             
-        result = fb_service.upload_hosted_file(page_id, page_access_token, video_id, file_url)
+        result = fb_service.upload_hosted_file(page_id, page_access_token, video_id, file_url, platform)
         return result
 
     elif action == 'check_reel_upload_status':
         page_id = event.get('page_id')
         page_access_token = event.get('page_access_token')
         video_id = event.get('video_id')
+        platform = event.get('platform')
         
         if not page_id or not page_access_token or not video_id:
             return {"error": "Missing required parameters: page_id, page_access_token, or video_id"}
             
-        result = fb_service.check_reel_upload_status(page_id, page_access_token, video_id)
+        result = fb_service.check_reel_upload_status(page_id, page_access_token, video_id, platform)
         return result
         
     elif action == 'publish_reel':
@@ -439,6 +442,7 @@ def handle_step_function_request(event, fb_service):
         share_to_feed = event.get('share_to_feed', True)
         audio_name = event.get('audio_name')
         thumbnail_url = event.get('thumbnail_url')
+        platform = event.get('platform')
         
         if not page_id or not page_access_token or not video_id or not description:
             return {"error": "Missing required parameters: page_id, page_access_token, video_id, or description"}
@@ -448,6 +452,7 @@ def handle_step_function_request(event, fb_service):
             page_access_token, 
             video_id, 
             description,
+            platform,
             share_to_feed,
             audio_name,
             thumbnail_url
