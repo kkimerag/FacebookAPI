@@ -1781,3 +1781,120 @@ class FacebookService:
         except Exception as e:
             print(f"Exception occurred: {str(e)}")
             return {"status": "error", "details": str(e)}
+
+    # Add these methods to your existing fb_service class
+
+    def create_instagram_media(self, instagram_id, page_access_token, caption, mediaType, mm_url=None):
+        """Step 1: Creates the Instagram media container"""
+        try:
+            create_url = f"https://graph.facebook.com/v19.0/{instagram_id}/media"
+            
+            if mediaType == "video":
+                if not mm_url:
+                    return {"status": "error", "details": "Missing video URL"}
+                create_params = {
+                    "media_type": "REELS",
+                    "video_url": mm_url,
+                    "caption": caption,
+                    "access_token": page_access_token,
+                    "share_to_feed": "true"
+                }
+            elif mediaType == "image":
+                if not mm_url:
+                    return {"status": "error", "details": "Missing image URL"}
+                create_params = {
+                    "image_url": mm_url,
+                    "caption": caption,
+                    "access_token": page_access_token
+                }
+            else:
+                return {"status": "error", "details": f"Unsupported media type: {mediaType}"}
+            
+            print(f"Creating media container: {create_params}")
+            create_resp = requests.post(create_url, data=create_params, timeout=30)
+            create_json = create_resp.json()
+            
+            print(f"Create response: {create_json}")
+            
+            if "id" not in create_json:
+                return {"status": "error", "step": "create", "response": create_json}
+            
+            return {
+                "status": "created",
+                "creation_id": create_json["id"],
+                "media_type": mediaType
+            }
+            
+        except Exception as e:
+            print(f"Error creating media: {str(e)}")
+            return {"status": "error", "details": str(e)}
+
+
+    def check_instagram_media_status(self, creation_id, page_access_token):
+        """Step 2: Checks if media is ready for publishing"""
+        try:
+            status_url = f"https://graph.facebook.com/v19.0/{creation_id}"
+            status_params = {
+                "fields": "status_code",
+                "access_token": page_access_token
+            }
+            
+            print(f"Checking status for creation_id: {creation_id}")
+            status_resp = requests.get(status_url, params=status_params, timeout=10)
+            status_json = status_resp.json()
+            
+            print(f"Status response: {status_json}")
+            
+            status_code = status_json.get("status_code", "UNKNOWN")
+            
+            return {
+                "status": "checked",
+                "processing_status": status_code,
+                "is_ready": status_code == "FINISHED",
+                "has_error": status_code == "ERROR"
+            }
+            
+        except Exception as e:
+            print(f"Error checking status: {str(e)}")
+            return {"status": "error", "details": str(e)}
+
+
+    def publish_instagram_media(self, instagram_id, creation_id, page_access_token):
+        """Step 3: Publishes the media to Instagram"""
+        try:
+            publish_url = f"https://graph.facebook.com/v19.0/{instagram_id}/media_publish"
+            publish_params = {
+                "creation_id": creation_id,
+                "access_token": page_access_token
+            }
+            
+            print(f"Publishing media: {publish_params}")
+            publish_resp = requests.post(publish_url, data=publish_params, timeout=30)
+            publish_json = publish_resp.json()
+            
+            print(f"Publish response: {publish_json}")
+            
+            # Check for specific "not ready" error
+            if "error" in publish_json:
+                error_subcode = publish_json["error"].get("error_subcode")
+                if error_subcode == 2207027:  # Media not ready
+                    return {
+                        "status": "not_ready",
+                        "error_code": error_subcode,
+                        "message": "Media is not ready to be published yet"
+                    }
+                else:
+                    return {"status": "error", "step": "publish", "response": publish_json}
+            
+            if "id" not in publish_json:
+                return {"status": "error", "details": "Unexpected publish response", "response": publish_json}
+            
+            return {
+                "status": "success",
+                "post_id": publish_json["id"],
+                "creation_id": creation_id
+            }
+            
+        except Exception as e:
+            print(f"Error publishing: {str(e)}")
+            return {"status": "error", "details": str(e)}        

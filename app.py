@@ -383,6 +383,92 @@ def handle_step_function_request(event, fb_service):
 
         return result
 
+    # Add these action handlers to your existing Lambda handler
+
+    elif action == 'post_to_page':
+        page_id = event.get('page_id')
+        page_access_token = event.get('page_access_token')
+        message = event.get('message')
+        mediaType = event.get('mediaType', False)
+        mm_url = event.get('mm_url', None)
+        if not page_id or not page_access_token or not message:
+            return {"error": "Missing required parameters"}
+        
+        social_media = event.get('social_media', 'Facebook')
+        if social_media == 'Instagram':
+            instagram_id = page_id
+            if not instagram_id:
+                return {"error": "Missing required parameter: instagram_id"}
+            # For Instagram, redirect to state machine workflow
+            return {
+                "redirect_to_state_machine": True,
+                "message": "Instagram posts must use state machine workflow. Use 'create_instagram_media' action instead."
+            }
+        else:
+            result = fb_service.post_to_facebook_page(page_id, page_access_token, message, mediaType, mm_url)
+        return result
+
+    # NEW ACTION HANDLERS FOR STATE MACHINE
+
+    elif action == 'create_instagram_media':
+        instagram_id = event.get('instagram_id') or event.get('page_id')
+        page_access_token = event.get('page_access_token')
+        caption = event.get('caption') or event.get('message')
+        mediaType = event.get('mediaType')
+        mm_url = event.get('mm_url')
+        
+        if not instagram_id or not page_access_token or not caption:
+            return {"error": "Missing required parameters: instagram_id, page_access_token, caption"}
+        
+        result = fb_service.create_instagram_media(
+            instagram_id, page_access_token, caption, mediaType, mm_url
+        )
+        
+        # Enrich result with parameters needed for next steps
+        if result.get('status') == 'created':
+            result['instagram_id'] = instagram_id
+            result['page_access_token'] = page_access_token
+        
+        return result
+
+    elif action == 'check_instagram_media_status':
+        creation_id = event.get('creation_id')
+        page_access_token = event.get('page_access_token')
+        
+        if not creation_id or not page_access_token:
+            return {"error": "Missing required parameters: creation_id, page_access_token"}
+        
+        result = fb_service.check_instagram_media_status(creation_id, page_access_token)
+        
+        # Pass through parameters needed for next steps
+        result['creation_id'] = creation_id
+        result['instagram_id'] = event.get('instagram_id')
+        result['page_access_token'] = page_access_token
+        result['media_type'] = event.get('media_type')
+        result['attempt'] = event.get('attempt', 0) + 1
+        
+        return result
+
+    elif action == 'publish_instagram_media':
+        instagram_id = event.get('instagram_id')
+        creation_id = event.get('creation_id')
+        page_access_token = event.get('page_access_token')
+        
+        if not instagram_id or not creation_id or not page_access_token:
+            return {"error": "Missing required parameters: instagram_id, creation_id, page_access_token"}
+        
+        result = fb_service.publish_instagram_media(instagram_id, creation_id, page_access_token)
+        
+        # Pass through parameters for retry logic
+        if result.get('status') == 'not_ready':
+            result['creation_id'] = creation_id
+            result['instagram_id'] = instagram_id
+            result['page_access_token'] = page_access_token
+            result['media_type'] = event.get('media_type')
+            result['publish_attempt'] = event.get('publish_attempt', 0) + 1
+        
+        return result    
+
     elif action == 'post_reel':
         page_id = event.get('page_id')
         page_access_token = event.get('page_access_token')
