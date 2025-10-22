@@ -1444,6 +1444,7 @@ class FacebookService:
                 "bio": page.get("bio", "N/A"),
                 "description": page.get("description", "N/A"),
                 "story" : page.get("story", "N/A"),
+                "picture": page.get("picture", "N/A"),
             }
         
         return {"error": "Page ID not found"}
