@@ -2,25 +2,35 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Facebook API Service
 
+Parameters:
+  EntityServiceBindings:
+    Type: String
+    Description: DynamoDB table name for entity service bindings
+    Default: ieva_entity_service_bindings
+  OrchestratorFunc:
+    Type: String
+    Description: Posting orchestration core
+    Default: arn:aws:lambda:us-east-1:039612842158:function:ieva-posting-orchestrator-IevaPostingOrchestrator-LahsMOTUA6x2:$LATEST 
+
 Globals:
-    Api:
-        Cors:
-            AllowMethods: "'GET,POST,OPTIONS'"
-            AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
-            AllowOrigin: "'*'"
-        GatewayResponses:
-              DEFAULT_4XX:
-                ResponseParameters:
-                  Headers:
-                    Access-Control-Allow-Origin: "'*'"
-                    Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
-                    Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-              DEFAULT_5XX:
-                ResponseParameters:
-                  Headers:
-                    Access-Control-Allow-Origin: "'*'"
-                    Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
-                    Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+  Api:
+    Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+        AllowOrigin: "'*'"
+    GatewayResponses:
+          DEFAULT_4XX:
+            ResponseParameters:
+              Headers:
+                Access-Control-Allow-Origin: "'*'"
+                Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+                Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+          DEFAULT_5XX:
+            ResponseParameters:
+              Headers:
+                Access-Control-Allow-Origin: "'*'"
+                Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+                Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
 
 
 Resources:
@@ -87,7 +97,22 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: states:StartExecution
-                Resource: arn:aws:states:us-east-1:039612842158:stateMachine:MyStateMachine-0n2fg15zg
+                Resource: !GetAtt FacebookCommentHandler.Arn
+              - Effect: Allow
+                Action:
+                  - events:RetrieveConnectionCredentials
+                  - events:DescribeConnection
+                Resource: !ImportValue RapidApiConnectionArnV3
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: 
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:events!connection/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: "*"
                               
   FacebookAPIFunction:
     Type: AWS::Serverless::Function
@@ -168,7 +193,55 @@ Resources:
             Path: /send-message
             Method: post           
      
-    
+  FacebookCommentHandler:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: "FacebookCommentHandler"
+      DefinitionUri: statemachines/facebook-comment-handler/machine.asl.json
+      DefinitionSubstitutions:
+        TableName: !Ref EntityServiceBindings
+        OrchestratorName: !Ref OrchestratorFunc
+        FacebookAPIFunctionArn: !GetAtt FacebookAPIFunction.Arn
+        RapiDapiConnArn: !ImportValue RapidApiConnectionArnV3
+
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: 
+                - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:FacebookAPIService-FacebookAPIFunction-*"
+                - !Ref OrchestratorFunc
+                - arn:aws:lambda:us-east-1:039612842158:function:ai-service-AIServiceFunction-NVMRJ9Rl6IU7
+                - arn:aws:lambda:us-east-1:039612842158:function:ai-service-AIServiceFunction-NVMRJ9Rl6IU7:*
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntityServiceBindings}"    
+            - Effect: Allow
+              Action:
+                - states:InvokeHTTPEndpoint
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - events:RetrieveConnectionCredentials
+                - events:DescribeConnection
+              Resource: !ImportValue RapidApiConnectionArnV3
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:DescribeSecret
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:events!connection/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+        
   FacebookLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -202,7 +275,7 @@ Resources:
         detail-type:
           - "Facebook Webhook Event"
       Targets:
-        - Arn: arn:aws:states:us-east-1:039612842158:stateMachine:MyStateMachine-0n2fg15zg
+        - Arn: !GetAtt FacebookCommentHandler.Arn
           Id: "FacebookWebhookTarget"
           RoleArn: !GetAtt EventBridgeRole.Arn
           InputPath: "$.detail"

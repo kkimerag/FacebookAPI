@@ -1,30 +1,10 @@
-# More information about the configuration file can be found here:
-# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html
 version = 0.1
 
-[default.global.parameters]
-stack_name = "FacebookAPIService"
-
-[default.build.parameters]
-cached = true
-parallel = true
-
-[default.validate.parameters]
-lint = true
-
 [default.deploy.parameters]
+stack_name = "FacebookAPIService"
+resolve_s3 = true
+s3_prefix = "FacebookAPIService"
+region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
-confirm_changeset = true
-resolve_s3 = true
-
-[default.package.parameters]
-resolve_s3 = true
-
-[default.sync.parameters]
-watch = true
-
-[default.local_start_api.parameters]
-warm_containers = "EAGER"
-
-[default.local_start_lambda.parameters]
-warm_containers = "EAGER"
+parameter_overrides = "EntityServiceBindings=\"ieva_entity_service_bindings\" OrchestratorFunc=\"arn:aws:lambda:us-east-1:039612842158:function:ieva-posting-orchestrator-IevaPostingOrchestrator-LahsMOTUA6x2:$LATEST\""
+image_repositories = []

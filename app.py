@@ -166,6 +166,8 @@ def handle_api_gateway_request(event, fb_service):
         hub_mode = params.get('hub.mode')
         hub_verify_token = params.get('hub.verify_token')
         hub_challenge = params.get('hub.challenge')
+
+        print(f'WEBHOOK_GET: {params}')
         
         # Verify the webhook
         if hub_mode == 'subscribe' and hub_verify_token:

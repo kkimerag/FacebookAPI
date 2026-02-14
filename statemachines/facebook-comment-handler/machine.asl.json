@@ -1,0 +1,416 @@
+{
+  "QueryLanguage": "JSONata",
+  "Comment": "A description of my state machine",
+  "StartAt": "SaveCommentMetaData",
+  "States": {
+    "SaveCommentMetaData":{
+      "Type": "Pass",
+      "Assign":{
+        "Payload": "{% $states.input %}"
+      },
+      "Next": "GetServiceEntity"
+    },
+    "GetServiceEntity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Arguments": {
+        "TableName": "${TableName}",
+        "Key": {
+          "platform_entity_id": {
+            "S": "{% 'fb:' & $states.input.owner_info.id %}"
+          }
+        }
+      },
+      "Next": "ChooseBidingService"
+    },
+    "ChooseBidingService":{
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $exists($states.input.Item) %}",
+          "Next": "ChooseAction"
+        }
+      ],
+      "Default": "Generate Comment Reply"
+    },
+    "ChooseAction":{
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% ($states.input.Item.action.S)  = (\"make-listing-video\")  %}",
+          "Next": "FetchSuggestions"
+        }
+      ],
+      "Default": "Success"
+    },
+    "FetchSuggestions":{
+      "Type": "Task",
+      "Resource": "arn:aws:states:::http:invoke",
+      "Assign":{
+        "token" : "{% $Payload.page_access_token %}",
+        "scheduleId": "{% $uuid() %}",
+        "requestedPostId": "{% $uuid() %}",
+        "totalScenes": 4,
+        "priorityTags": [ 
+          "house_view", 
+          "living_room", 
+          "kitchen", 
+          "bedroom", 
+          "pool", 
+          "dining_room", 
+          "bedroom", 
+          "bathroom", 
+          "laundry_room", 
+          "road_view", 
+          "porch", 
+          "yard", 
+        ]
+      },
+      "Arguments": {
+        "ApiEndpoint": "https://realtor-search.p.rapidapi.com/properties/auto-complete",
+        "Method": "GET",
+
+        "QueryParameters": {
+          "input": "{% $Payload.comment_data.message %}"
+        },
+
+        "Headers": {
+          "x-rapidapi-host": "realtor-search.p.rapidapi.com"
+        },
+
+        "Authentication": {
+          "ConnectionArn": "${RapiDapiConnArn}"
+        }
+      },
+      "Next": "FilterSuggestions"
+    },
+    "FilterSuggestions":{
+      "Type": "Pass",
+      "Assign": {
+        "selectedSuggestion": "{% $sort($states.input.ResponseBody.data.autocomplete[area_type='address'],function($l,$r){$r._score - $l._score})[0] %}"
+      },
+      "Next": "ChooseResponse"
+    },
+    "ChooseResponse":{
+      "Type": "Choice",
+      "Choices":[
+        {
+          "Condition": "{% $exists($selectedSuggestion) %}",
+          "Next": "FetchPropertyDetails"
+        }
+      ],
+      "Default": "CreatePlayloadForNoAddressComment"
+    },
+    "FetchPropertyDetails": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::http:invoke",
+      "Arguments": {
+        "ApiEndpoint": "https://realtor-search.p.rapidapi.com/properties/detail",
+        "Method": "GET",
+        "QueryParameters": {
+          "propertyId": "{% $selectedSuggestion.mpr_id %}"
+        },
+        "Headers": {
+          "x-rapidapi-host": "realtor-search.p.rapidapi.com"
+        },
+        "Authentication": {
+          "ConnectionArn": "${RapiDapiConnArn}"
+        }
+      },
+      "Assign": {
+        "propertyDetailResponse": "{% $states.result.ResponseBody.data %}"
+      },
+      "Next": "DeterminePhotoSource"
+    },
+    "DeterminePhotoSource": {
+      "Type": "Pass",
+      "Assign": {
+        "rawPhotos": "{% $type($propertyDetailResponse.photos)='array' ? $propertyDetailResponse.photos : ($count($propertyDetailResponse.property_history[$type(listing.photos)='array'])>0 ? $propertyDetailResponse.property_history[$type(listing.photos)='array'][0].listing.photos : []) %}"
+      },
+      "Next": "NormalizePhotos"
+    },
+    "NormalizePhotos": {
+      "Type": "Pass",
+      "Assign": {
+        "propertyHDPhotos": "{% $rawPhotos[$type($)= 'object'].{'href':($.href?$replace($.href,/(s|m|l|xl|xxl)\\.jpg$/,'rd-w1280_h960.jpg'):$.href),'tags':$.tags} %}"
+      },
+      "Next": "CheckIfPhotosHaveTags"
+    },
+    "CheckIfPhotosHaveTags": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $count($propertyHDPhotos)>0 and $type($propertyHDPhotos[0].tags)='array' %}",
+          "Next": "SelectingScenesByTags"
+        }
+      ],
+      "Default": "SelectingScenesFallback"
+    },
+    "SelectingScenesFallback": {
+      "Type": "Pass",
+      "Assign": {
+        "selectedScenes": "{% $map($filter($propertyHDPhotos,function($v,$i){$i < $totalScenes}),function($p){$p.href}) %}"
+      },
+      "Next": "UploadScenesToS3"
+    },
+    "SelectingScenesByTags":{
+      "Type": "Pass",
+      "Assign": {
+        "selectedScenes": "{% $map($distinct($priorityTags),function($scene){$count($propertyHDPhotos[tags.label=$scene])>0?$propertyHDPhotos[tags.label=$scene][0].href:null})[$] %}"
+      },
+      "Next": "UploadScenesToS3"
+    },
+    "UploadScenesToS3": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "Call HTTPS APIs",
+        "States": {
+          "Call HTTPS APIs": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::http:invoke",
+            "Arguments": {
+              "ApiEndpoint": "https://ieva.tech/api/upload-external-image",
+              "Method": "POST",
+              "InvocationConfig": {
+                "ConnectionArn": "${RapiDapiConnArn}"
+              },
+              "RequestBody": {
+                "url": "{% $states.input %}"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 1,
+                "MaxAttempts": 3,
+                "JitterStrategy": "FULL"
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "Next": "ExtractUploadedUrls",
+      "Items": "{% $selectedScenes %}"
+    },
+    "ExtractUploadedUrls": {
+      "Type": "Pass",
+      "Assign": {
+        "uploadedSceneUrls": "{% $map($states.input, function($r) {$r.ResponseBody.data}) %}"
+      },
+      "Next": "BuildPostModelPayload"
+    },
+    "CreatePlayloadForNoAddressComment":{
+      "Type": "Pass",
+      "Assign": {
+        "PlayloadForComment":{
+          "action": "reply_to_comment",
+          "page_access_token": "{% $token %}",
+          "reply_text": "We are not able to find an address from your comment.",
+          "status": "",
+          "original_comment_id": "{% $Payload.comment_data.comment_id %}",
+          "timestamp": "{% $Payload.comment_data.created_time %}",
+          "commenter_id": "{% $Payload.comment_data.from.id %}",
+          "token_usage": ""
+        }
+      },
+      "Next": "Post Comment Reply"
+    },
+    "BuildPostModelPayload":{
+      "Type": "Pass",
+      "Assign":{
+        "PostModelPayload": {
+          "action" : "create_post_model",
+          "scheduleName": "{% $scheduleId %}",
+          "expression": "instant",
+          "description": "To be posted inmediately",
+          "type": "none",
+          "user_id": "1",
+          "mediaType": "video",
+          "imageSource": "ai-enriched",
+          "selectedSource": "ai-enriched-content",
+          "selectedVideoType": "cinematic",
+          "selectedOrientation": "landscape",
+          "selectedAvatar": "none",
+          "selectedAvatarVoice": "none",
+          "selectedStyle": "1",
+          "modifyBaseImage": false,
+          "postLang": "english",
+          "userContent": "none",
+          "userMedia" : "{% $uploadedSceneUrls %}",
+          "channels": [
+            {
+              "isFromService": true,
+              "social_media_account": {
+                "social": "Facebook",
+                "token": "{% $token %}",
+                "channel_id": "{% $Payload.owner_info.id %}",
+                "primary": true
+              },
+              "socialMediaToken" : "{% $token %}",
+              "channel_id": "{% $Payload.owner_info.id %}",
+              "social_media": {
+                "name" : "Facebook"
+              },
+              "primary": true
+            }
+          ],
+          "textToEnrich": "{% $string($propertyDetailResponse) %}"
+        }
+      },
+      "Next": "CreatePostModel"
+    },
+    "CreatePostModel": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Output": "{% $states.result.Payload %}",
+      "Arguments": {
+        "FunctionName": "${OrchestratorName}",
+        "Payload": "{% $PostModelPayload %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "BuildPostSkeleton"
+    },
+    "BuildPostSkeleton":{
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${OrchestratorName}",
+        "Payload": {
+          "action": "create_post_skeleton",
+          "schedule_id": "{% $scheduleId %}",
+          "requested_post_id": "{% $requestedPostId %}",
+          "posting_date": "inmediately",
+          "mediaType": "video",
+          "unix_timestamp": "{% $floor($toMillis($now()) / 1000) %}"
+        }
+      },
+      "Next": "PreparePost"
+    },
+    "PreparePost":{
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${OrchestratorName}",
+        "Payload": {
+          "action": "prepare_post",
+          "schedule_id": "{% $scheduleId %}",
+          "requested_post_id": "{% $requestedPostId %}",
+          "posting_date": "inmediately",
+          "unix_timestamp": "{% $floor($toMillis($now()) / 1000) %}"
+        }
+      },
+      "Next": "Processing Comment Reply"
+    },
+    "Processing Comment Reply": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${FacebookAPIFunctionArn}:$LATEST",
+        "Payload": {
+          "action": "reply_to_comment",
+          "page_access_token": "{% $token %}",
+          "reply_text": "Address accepted. Processing.",
+          "status": "",
+          "original_comment_id": "{% $Payload.comment_data.comment_id %}",
+          "timestamp": "{% $Payload.comment_data.created_time %}",
+          "commenter_id": "{% $Payload.comment_data.from.id %}",
+          "token_usage": ""
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "Success"
+    },
+    "Generate Comment Reply": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "arn:aws:lambda:us-east-1:039612842158:function:ai-service-AIServiceFunction-NVMRJ9Rl6IU7:$LATEST",
+        "Payload": "{% $Payload %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "Post Comment Reply",
+      "Output": {
+        "action": "reply_to_comment",
+        "page_access_token": "{% $Payload.page_access_token %}",
+        "reply_text": "{% $states.result.Payload.reply_text %}",
+        "status": "{% $states.result.Payload.status %}",
+        "original_comment_id": "{% $states.result.Payload.original_comment_id %}",
+        "timestamp": "{% $states.result.Payload.timestamp %}",
+        "commenter_id": "{% $Payload.comment_data.from.id %}",
+        "token_usage": "{% $states.result.Payload.token_usage %}"
+      }
+    },
+    "Post Comment Reply": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${FacebookAPIFunctionArn}",
+        "Payload": "{% $exists($PlayloadForComment) ? $PlayloadForComment : $states.input %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "Success"
+    },
+    "Success": {
+      "Type": "Succeed"
+    }
+  }
+}

@@ -221,6 +221,8 @@ class FacebookService:
 
         pages = data["data"]
 
+        print(f"PAGES: { pages }")
+
         # Now fetch instagram account for each page
         for page in pages:
             page_token = page.get("access_token")
